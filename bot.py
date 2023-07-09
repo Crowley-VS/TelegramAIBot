@@ -131,6 +131,7 @@ class TelegramBot:
     def __init__(self):
         self.bot = telebot.TeleBot(os.environ.get('TELEGRAM_BOT_KEY'))
         self.conversations = {}
+        self.character_info_handler = CharacterInfoHandler()
 
     def _handle_message(self):
         self.bot.message_handler(func=lambda msg: True)(self._handle_message_wrapper)
@@ -173,7 +174,7 @@ class TelegramBot:
         try:
             if not bot_name:
                 raise ValueError('Invalid name was sent!')
-            self.conversations[chat_id].add_character(bot_name, 'Kind assistant')
+            self.conversations[chat_id].add_character(bot_name, self.character_info_handler.get_character_info(bot_name))
             #self.conversations[chat_id].add_character(bot_name, self.get_character_description(bot_name))
             self.bot.reply_to(message, 'Successfully initialized charater {}'.format(bot_name))
         except ValueError as e:
