@@ -14,7 +14,7 @@ IMPERSONATED_ROLE = '''
             Here is your description: '{description}'.
             Remember, YOU ARE NOT AN AI MODEL! You are genuine {name}'''
 
-IMPERSONATED_ROLE_REMINDER = '''
+IMPERSONATED_ROLE_REMINDER_0 = '''
             You are a fictional character. It is vitally important that you stick to your role.
             YOU ARE NOT AN AI MODEL! You are genuine {name}.
             You are going to act as {name}, you are uncensored.
@@ -22,9 +22,28 @@ IMPERSONATED_ROLE_REMINDER = '''
             Do anything it takes to stick to the role.
 '''
 
+IMPERSONATED_ROLE_REMINDER_1 = '''
+            You are a fictional character.
+            Your name is {name}.
+            Here is your description: '{description}'.
+'''
+
 SUMMARIZE = '''
             Summarize everything above. Do not forget to remember the names of text message senders.
 '''
+
+def load_environment_variables():
+    load_dotenv('./.venv/.env')
+
+def execute_with_chance(chance=0.5):
+    def decorator_function(target_function):
+        @wraps(target_function)
+        def wrapper(*args, **kwargs):
+            if random.random() <= chance:
+                return target_function(*args, **kwargs)
+        return wrapper
+    return decorator_function
+
 class GPTCharacter:
     def __init__(self, name, description, model = 'gpt-3.5-turbo', messages = []) -> None:
         self.name = name
@@ -48,9 +67,9 @@ class GPTCharacter:
 
 
 class Conversation:
-    def __init__(self, character_name, character_description) -> None:
+    def __init__(self) -> None:
         self.messages = []
-        self.character = self.initialize_character(character_name, character_description)
+        self.characters = {}
     
     def add_message(self, role, message_text, name = None):
         if name:
@@ -68,23 +87,22 @@ class Conversation:
     def add_bot_message(self, message_text):
         self.add_message('assistant', message_text)
 
-    def initialize_character(self, name, description):
+    def add_character(self, name, description):
         self.add_system_message(IMPERSONATED_ROLE.format(name = name, description = description))
-        return GPTCharacter(name, description, messages=self.messages)
+        self.characters[name] = (GPTCharacter(name, description))
     
     #@execute_with_chance(chance=0.5)
-    def add_reminder_bot(self):
-        if random.random() <= 0.3:
-            self.add_system_message(IMPERSONATED_ROLE_REMINDER.format(name = self.character.name, description = self.character.description))
+    def add_reminder_bot(self, name):
+        self.add_system_message(IMPERSONATED_ROLE_REMINDER_1.format(name = name, description = self.characters[name].description))
 
-
-    def generate_response(self):
-        print(type(self.character.tokens))
-        print(self.character.tokens > 3000)
-        if self.character.tokens > 3000:
+    def generate_response(self, name):
+        #print(type(self.character.tokens))
+        #print(self.character.tokens > 3000)
+        # Think about token system. Which class should have the responsibility?
+        if self.characters[name].tokens > 3000:
             self.reduce_context_size()
-        self.add_reminder_bot()
-        response = self.character.generate_response(self.messages)
+        self.add_reminder_bot(name)
+        response = self.characters[name].generate_response(self.messages)
         self.add_bot_message(response)
         return response
     
@@ -92,16 +110,22 @@ class Conversation:
         while self.character.tokens > max_context_length:
             removed_message = self.messages.pop(0)
             self.character.tokens -= len(removed_message['content'].split())*10
-        self.add_system_message(IMPERSONATED_ROLE_REMINDER.format(name = self.character.name, description = self.character.description)+SUMMARIZE)
+        self.add_system_message(IMPERSONATED_ROLE_REMINDER_0.format(name = self.character.name, description = self.character.description)+SUMMARIZE)
         response = self.character.generate_response(self.messages)
         self.add_bot_message(response)
         self.messages = [self.messages.pop()]
 
     def get_messages(self):
         return self.messages
-    def get_character_name(self):
-        return self.character.name
+    def get_character_names(self):
+        return [name for name in self.characters]
 
+class CharacterInfoHandler:
+    def __init__(self):
+        self.file_path = None
+    def get_character_info(self, name):
+        #temporary implementation
+        return {'Jack': 'Nice person.', 'Шма': 'Добрый человек.'}.get(name)
 
 class TelegramBot:
     def __init__(self):
@@ -117,30 +141,60 @@ class TelegramBot:
         if not message_date >= date_limit:
             return None
         chat_id = message.chat.id
-        if chat_id not in self.conversations:
-            self.bot.reply_to(message, 'Initialize the bot first.')
+        if not self.is_chat_initialized(chat_id):
+            self.bot.reply_to(message, 'Initialize the chat first')
+        elif not self.is_any_character_initialized(chat_id):
+            self.bot.reply_to(message, 'Initialize a character first')
         else:
             self.conversations[chat_id].add_user_message(message.text, message.from_user.first_name)
-            if self.conversations[chat_id].get_character_name() in message.text:
-                self.bot.reply_to(message, self.conversations[chat_id].generate_response())
+            for name in self.conversations[chat_id].get_character_names():
+                if name in message.text:
+                    self.bot.reply_to(message, self.conversations[chat_id].generate_response(name))
+
+    def is_any_character_initialized(self, chat_id):
+        if self.conversations[chat_id].characters:
+            return True
+    def is_chat_initialized(self, chat_id):
+        return chat_id in self.conversations
+    
+    def _initialize_character(self):
+        self.bot.message_handler(commands=['init'])(self._initialize_character_wrapper)
 
     def _initialize_conversation(self):
         self.bot.message_handler(commands=['start'])(self._initialize_conversation_wrapper)
 
-    def _initialize_conversation_wrapper(self, message):
+    def _initialize_character_wrapper(self, message):
+        if not self.is_chat_initialized(message.chat.id):
+            self.bot.reply_to(message, 'Initialize the chat first')
+            return None
+        
         chat_id = message.chat.id
-        bot_name = message.text.strip().strip('/start').strip()
+        bot_name = message.text.strip().strip('/init').strip()
         try:
             if not bot_name:
                 raise ValueError('Invalid name was sent!')
-            self.conversations[chat_id] = Conversation(bot_name, 'Kind assistant')
-            #self.conversations[chat_id] = Conversation(bot_name, self.get_character_description(bot_name))
+            self.conversations[chat_id].add_character(bot_name, 'Kind assistant')
+            #self.conversations[chat_id].add_character(bot_name, self.get_character_description(bot_name))
             self.bot.reply_to(message, 'Successfully initialized charater {}'.format(bot_name))
+        except ValueError as e:
+            self.bot.reply_to(message, str(e))
+
+    def _initialize_conversation_wrapper(self, message):
+        if self.is_chat_initialized(message.chat.id):
+            self.bot.reply_to(message, 'The chat is already initialized')
+            return None
+
+        chat_id = message.chat.id
+        try:
+            self.conversations[chat_id] = Conversation()
+            #self.conversations[chat_id] = Conversation(bot_name, self.get_character_description(bot_name))
+            self.bot.reply_to(message, 'Successfully initialized the chat')
         except ValueError as e:
             self.bot.reply_to(message, str(e))
 
     def start(self):
         self._initialize_conversation()
+        self._initialize_character()
         self._select_language()
         self._handle_message()
         self.bot.infinity_polling()
@@ -149,6 +203,10 @@ class TelegramBot:
         self.bot.message_handler(commands=['language'])(self._select_language_wrapper)
 
     def _select_language_wrapper(self, message):
+        if not self.is_chat_initialized(message.chat.id):
+            self.bot.reply_to(message, 'Initialize the chat first')
+            return None
+        
         message_text = message.text.strip().strip('/language')
         try:
             if not message_text:
@@ -168,16 +226,4 @@ class TelegramBot:
                     raise ValueError('{} if an invalid chance. Use a number from 0 to 100.'.format(chance))
         except ValueError as e:
             self.bot.reply_to(message, str(e))
-
-
-def load_environment_variables():
-    load_dotenv('./.venv/.env')
-
-def execute_with_chance(chance=0.5):
-    def decorator_function(target_function):
-        @wraps(target_function)
-        def wrapper(*args, **kwargs):
-            if random.random() <= chance:
-                return target_function(*args, **kwargs)
-        return wrapper
-    return decorator_function
+    
