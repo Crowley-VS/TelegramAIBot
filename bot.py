@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import random
 from functools import wraps
 from datetime import datetime, timedelta
+from flask import Flask, request
 DAYS_LIMIT = 3
 
 IMPERSONATED_ROLE = '''
@@ -150,16 +151,16 @@ class CharacterInfoHandler:
         self.file_path = None
     def get_character_info(self, name):
         #temporary implementation
-        return {'Jack': 'Nice person.', 'Шма': 'Добрый человек.'}.get(name)
+        return {'Биба': 'Добрый человек. Всегда выслушает и поддержит. Любит Genshin Impact. Ты говоришь по-русски. Вы отвечаете в стиле телефонных текстовых сообщений. Они довольно короткие.', 'Шма': 'Странная, грубая девушка Шма. Ты много ругаешься.Вы любите иронию. Ты говоришь по-русски. Вы отвечаете в стиле телефонных текстовых сообщений. Они довольно короткие.'}.get(name)
 
 class TelegramBot:
     def __init__(self):
-        self.bot = telebot.TeleBot(os.environ.get('TELEGRAM_BOT_KEY'))
+        self.telegram_api = telebot.TeleBot(os.environ.get('TELEGRAM_BOT_KEY'))
         self.conversations = {}
         self.character_info_handler = CharacterInfoHandler()
 
     def _handle_message(self):
-        self.bot.message_handler(func=lambda msg: True)(self._handle_message_wrapper)
+        self.telegram_api.message_handler(func=lambda msg: True)(self._handle_message_wrapper)
     
     def _handle_message_wrapper(self, message):
         message_date = datetime.fromtimestamp(message.date)
@@ -168,14 +169,14 @@ class TelegramBot:
             return None
         chat_id = message.chat.id
         if not self.is_chat_initialized(chat_id):
-            self.bot.reply_to(message, 'Initialize the chat first')
+            self.telegram_api.reply_to(message, 'Initialize the chat first')
         elif not self.is_any_character_initialized(chat_id):
-            self.bot.reply_to(message, 'Initialize a character first')
+            self.telegram_api.reply_to(message, 'Initialize a character first')
         else:
             self.conversations[chat_id].add_user_message(message.text, message.from_user.first_name)
             for name in self.conversations[chat_id].get_character_names():
                 if name in message.text:
-                    self.bot.reply_to(message, self.conversations[chat_id].generate_response(name))
+                    self.telegram_api.reply_to(message, self.conversations[chat_id].generate_response(name))
 
     def is_any_character_initialized(self, chat_id):
         if self.conversations[chat_id].characters:
@@ -184,14 +185,14 @@ class TelegramBot:
         return chat_id in self.conversations
     
     def _initialize_character(self):
-        self.bot.message_handler(commands=['init'])(self._initialize_character_wrapper)
+        self.telegram_api.message_handler(commands=['init'])(self._initialize_character_wrapper)
 
     def _initialize_conversation(self):
-        self.bot.message_handler(commands=['start'])(self._initialize_conversation_wrapper)
+        self.telegram_api.message_handler(commands=['start'])(self._initialize_conversation_wrapper)
 
     def _initialize_character_wrapper(self, message):
         if not self.is_chat_initialized(message.chat.id):
-            self.bot.reply_to(message, 'Initialize the chat first')
+            self.telegram_api.reply_to(message, 'Initialize the chat first')
             return None
         
         chat_id = message.chat.id
@@ -201,36 +202,36 @@ class TelegramBot:
                 raise ValueError('Invalid name was sent!')
             self.conversations[chat_id].add_character(bot_name, self.character_info_handler.get_character_info(bot_name))
             #self.conversations[chat_id].add_character(bot_name, self.get_character_description(bot_name))
-            self.bot.reply_to(message, 'Successfully initialized charater {}'.format(bot_name))
+            self.telegram_api.reply_to(message, 'Successfully initialized charater {}'.format(bot_name))
         except ValueError as e:
-            self.bot.reply_to(message, str(e))
+            self.telegram_api.reply_to(message, str(e))
 
     def _initialize_conversation_wrapper(self, message):
         if self.is_chat_initialized(message.chat.id):
-            self.bot.reply_to(message, 'The chat is already initialized')
+            self.telegram_api.reply_to(message, 'The chat is already initialized')
             return None
 
         chat_id = message.chat.id
         try:
             self.conversations[chat_id] = Conversation()
             #self.conversations[chat_id] = Conversation(bot_name, self.get_character_description(bot_name))
-            self.bot.reply_to(message, 'Successfully initialized the chat')
+            self.telegram_api.reply_to(message, 'Successfully initialized the chat')
         except ValueError as e:
-            self.bot.reply_to(message, str(e))
+            self.telegram_api.reply_to(message, str(e))
 
     def start(self):
         self._initialize_conversation()
         self._initialize_character()
         self._select_language()
         self._handle_message()
-        self.bot.infinity_polling()
+        self.telegram_api.infinity_polling()
 
     def _select_language(self):
-        self.bot.message_handler(commands=['language'])(self._select_language_wrapper)
+        self.telegram_api.message_handler(commands=['language'])(self._select_language_wrapper)
 
     def _select_language_wrapper(self, message):
         if not self.is_chat_initialized(message.chat.id):
-            self.bot.reply_to(message, 'Initialize the chat first')
+            self.telegram_api.reply_to(message, 'Initialize the chat first')
             return None
         
         message_text = message.text.strip().strip('/language')
@@ -251,5 +252,33 @@ class TelegramBot:
                 except ValueError:
                     raise ValueError('{} if an invalid chance. Use a number from 0 to 100.'.format(chance))
         except ValueError as e:
-            self.bot.reply_to(message, str(e))
-    
+            self.telegram_api.reply_to(message, str(e))
+
+class WebhookManager:
+    def __init__(self, bot, webhook_url):
+        self.bot = bot
+        self.webhook_url = webhook_url
+        self.app = Flask(__name__)
+
+    def handle_webhook(self):
+        @self.app.route('/webhook', methods=['POST'])
+        def handle_request():
+            # When the handle_request function is executed, Flask automatically
+            # provides the request object as an argument to the function,
+            # giving access to the details of the incoming request. 
+            if request.headers.get('content-type') == 'application/json':
+                json_data = request.get_json()
+                update = telebot.types.Update.de_json(json_data)
+                self.bot.telegram_api.process_new_updates([update])
+                return 'OK', 200
+            else:
+                return 'Unsupported Media Type', 415
+
+    def set_webhook(self):
+        self.bot.telegram_api.remove_webhook()
+        self.bot.telegram_api.set_webhook(url=self.webhook_url)
+
+    def run(self):
+        self.set_webhook()
+        self.handle_webhook()
+        self.app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
