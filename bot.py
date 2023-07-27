@@ -36,7 +36,7 @@ SUMMARIZE = '''
 '''
 
 def load_environment_variables():
-    load_dotenv('./.venv/.env')
+    load_dotenv('.env')
 
 def execute_with_chance(chance=0.5):
     def decorator_function(target_function):
@@ -53,7 +53,6 @@ class GPTCharacter:
         self.description = description
         self.model = model
         self.token_handler = token_handler
-        load_dotenv('./.venv/.env')
         openai.organization = os.environ.get('CHAT_GPT_ORG')
         openai.api_key = os.environ.get('CHAT_GPT_KEY')
 
