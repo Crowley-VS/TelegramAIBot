@@ -47,8 +47,71 @@ def execute_with_chance(chance=0.5):
         return wrapper
     return decorator_function
 
+class TokenHandler:
+    '''
+    Handles amount of tokens for a given conversation.
+    It is shared between all the characters associated with the
+    conversation.
+    '''
+    def __init__(self, initial_tokens: int = 0):
+        '''
+        Initialize the TokenHandler.
+
+        :param initial_tokens: int, the initial number of tokens.
+        '''
+        self.tokens = initial_tokens
+
+    def update_tokens(self, amount: int):
+        '''
+        Update the number of tokens.
+
+        :param amount: int, the amount by which tokens should be updated.
+        '''
+        self.tokens += amount
+
+    def get_tokens(self):
+        '''
+        Get the current number of tokens.
+
+        :return: int, the current number of tokens.
+        '''
+        return self.tokens
+    def set_tokens(self, amount: int):
+        '''
+        Set the number of tokens to a specific amount.
+
+        :param amount: int, the amount to set as the new token count.
+        '''
+        self.tokens = amount
+
 class GPTCharacter:
-    def __init__(self, name, description, model = 'gpt-3.5-turbo', messages = [], token_handler = None) -> None:
+    '''
+    Represents a ChatGPT character with
+    specific name and description.
+    '''
+    def __init__(self, name: str, description: str, model: str = 'gpt-3.5-turbo', token_handler: TokenHandler = None) -> None:
+        '''
+        Initialize a ChatGPT character.
+        
+        :param name: str, name of the character
+        :param description: str, description of the character.
+            The description is suggested to include
+            - The type of messages a character will send
+            e.g. Short text messages under 100 characters
+            - The message tone
+            - Descriptive sentences.
+        :param model: str, name of the chatgpt model to be used
+            Default: 'gpt-3.5-turbo'
+        :param token_handler: TokenHandler class instance
+            Handles the amount of tokens for a given conversation
+        :env variable organization: str, organization key for chatgpt services
+            It should be specified in .env file in format CHAT_GPT_ORG = key
+            It can be found on personal account page on ChatGPT.com
+        :env variable: str, api key for ChatGPT services
+            It should be specified in .env file in format CHAT_GPT_KEY = key
+            It can be found on personal account page on ChatGPT.com
+        :return: None
+        '''
         self.name = name
         self.description = description
         self.model = model
@@ -56,70 +119,125 @@ class GPTCharacter:
         openai.organization = os.environ.get('CHAT_GPT_ORG')
         openai.api_key = os.environ.get('CHAT_GPT_KEY')
 
-    def generate_response(self, message_hostory):
+    def generate_response(self, message_history: list[dict]):
+        '''
+        Generate a uniqie response based on the
+        character's description and message history.
+
+        :param message_history: list[dict], list of dictionaries in format
+            {'role': role, 'content': message_text}
+        '''
         output = openai.ChatCompletion.create(
             model=self.model,
             temperature=1,
             presence_penalty=0,
             frequency_penalty=0,
-            messages=message_hostory
+            messages=message_history
         )
         self.token_handler.set_tokens(output['usage']['total_tokens'])
         return output['choices'][0]['message']['content']
 
-class TokenHandler:
-    def __init__(self, initial_tokens = 0):
-        self.tokens = initial_tokens
-
-    def update_tokens(self, amount):
-        self.tokens += amount
-
-    def get_tokens(self):
-        return self.tokens
-    def set_tokens(self, amount):
-        self.tokens = amount
-
 class Conversation:
+    '''
+    Represents a conversation with multiple characters.
+    '''
     def __init__(self) -> None:
+        '''
+        Initialize the Conversation.
+
+        Creates an empty list to hold messages, an empty dictionary for characters,
+        and a TokenHandler instance to handle tokens for the conversation.
+        '''
         self.messages = []
         self.characters = {}
         self.token_handler = TokenHandler()
     
     def add_message(self, role, message_text, name = None):
+        '''
+        Add a message to the conversation.
+
+        :param role: str, the role of the speaker
+            (e.g., 'user', 'assistant', 'system').
+        :param message_text: str, the content of the message.
+        :param name: str, optional, the name of the character sending the message (if applicable).
+        '''
         if name:
+            # If the message is from a character, prepend the character's name to the message text.
             message_text = 'The following message is sent by {}. Message: {}'.format(name, message_text)
             self.messages.append({'role': role, 'content': message_text})
         else:
+            # If the message is not from a character, simply add it to the list of messages.
             self.messages.append({'role': role, 'content': message_text})
     
     def add_system_message(self, message_text):
+        '''
+        Add a system message to the conversation.
+
+        :param message_text: str, the content of the system message.
+        '''
+        # System messages are added with the 'system' role.
         self.add_message('system', message_text)
 
     def add_user_message(self, message_text, name):
+        '''
+        Add a user message to the conversation.
+
+        :param message_text: str, the content of the user message.
+        :param name: str, the name of the user.
+        '''
+        # User messages are added with the 'user' role and include the user's name.
         self.add_message('user', message_text, name)
 
     def add_bot_message(self, message_text):
+        '''
+        Add an assistant message to the conversation.
+
+        :param message_text: str, the content of the assistant message.
+        '''
+        # Bot messages are added with the 'assistant' role.
         self.add_message('assistant', message_text)
 
     def add_character(self, name, description):
+        '''
+        Add a character to the conversation.
+
+        :param name: str, the name of the character.
+        :param description: str, description of the character.
+        '''
+        # Create a new GPTCharacter instance and add it to the characters dictionary.
         self.characters[name] = (GPTCharacter(name, description, token_handler=self.token_handler))
+        # After adding the character, send a system message as a reminder about the character's role.
         for character in self.characters.values():
             reminder = IMPERSONATED_ROLE_REMINDER_0_EACH_CHARACTER.format(character.name, character.description)
             self.add_system_message(reminder)
     
-    #@execute_with_chance(chance=0.5)
     def add_reminder_bot(self, name):
+        '''
+        Add a reminder for the character to the conversation.
+
+        :param name: str, the name of the character.
+        '''
+        # Send a system message as a reminder about the character's role.
         self.add_system_message(IMPERSONATED_ROLE_REMINDER_1.format(name = name, description = self.characters[name].description))
 
     def generate_response(self, name):
-        #print(type(self.character.tokens))
-        #print(self.character.tokens > 3000)
-        # Think about token system. Which class should have the responsibility?
+        '''
+        Generate a response for the specified character based on the conversation history.
+
+        :param name: str, the name of the character to generate the response for.
+        :return: str, the generated response.
+        '''
+        # If the token count is higher than the limit, reduce the context size to prevent token limit exceedance.
         if self.token_handler.get_tokens() > 3000:
             self.reduce_context_size(name)
+        
+        # Add a reminder about the character before generating a response.
         self.add_reminder_bot(name)
+        # Generate a response for the character using the conversation history.
         response = self.characters[name].generate_response(self.messages)
+        # Add the response as an assistant message to the conversation.
         self.add_bot_message(response)
+        # Return the generated response.
         return response
     
     def reduce_context_size(self, name, max_context_length = 3000):
@@ -141,8 +259,18 @@ class Conversation:
         print(self.messages)
 
     def get_messages(self):
+        '''
+        Get the list of messages in the conversation.
+
+        :return: list[dict], a list of dictionaries representing messages.
+        '''
         return self.messages
     def get_character_names(self):
+        '''
+        Get the names of all characters in the conversation.
+
+        :return: list[str], a list of character names.
+        '''
         return [name for name in self.characters]
 
 class CharacterInfoHandler:
