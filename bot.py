@@ -223,7 +223,6 @@ class TelegramBot:
         self._initialize_character()
         self._select_language()
         self._handle_message()
-        self.telegram_api.infinity_polling()
 
     def _select_language(self):
         self.telegram_api.message_handler(commands=['language'])(self._select_language_wrapper)
@@ -259,20 +258,19 @@ class WebhookManager:
         self.webhook_url = webhook_url
         self.app = Flask(__name__)
 
+    def _handle_request(self):
+        # When the handle_request function is executed, Flask automatically
+        # provides the request object as an argument to the function,
+        # giving access to the details of the incoming request. 
+        if request.headers.get('content-type') == 'application/json':
+            json_data = request.get_json()
+            update = telebot.types.Update.de_json(json_data)
+            self.bot.telegram_api.process_new_updates([update])
+            return 'OK', 200
+        else:
+            return 'Unsupported Media Type', 415
     def handle_webhook(self):
-        @self.app.route('/webhook', methods=['POST'])
-        def handle_request():
-            # When the handle_request function is executed, Flask automatically
-            # provides the request object as an argument to the function,
-            # giving access to the details of the incoming request. 
-            if request.headers.get('content-type') == 'application/json':
-                json_data = request.get_json()
-                update = telebot.types.Update.de_json(json_data)
-                self.bot.telegram_api.process_new_updates([update])
-                return 'OK', 200
-            else:
-                return 'Unsupported Media Type', 415
-
+        self.app.route('/', methods=['POST'])(self._handle_request)
     def set_webhook(self):
         self.bot.telegram_api.remove_webhook()
         self.bot.telegram_api.set_webhook(url=self.webhook_url)
@@ -280,4 +278,5 @@ class WebhookManager:
     def run(self):
         self.set_webhook()
         self.handle_webhook()
+        self.bot.start()
         self.app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
