@@ -1,6 +1,7 @@
 import openai
 import os
 import telebot
+import json
 from dotenv import load_dotenv
 import random
 from functools import wraps
@@ -159,10 +160,10 @@ class Conversation:
         :param role: str, the role of the speaker
             (e.g., 'user', 'assistant', 'system').
         :param message_text: str, the content of the message.
-        :param name: str, optional, the name of the character sending the message (if applicable).
+        :param name: str, optional, the name of a character or a user sending the message (if applicable).
         '''
         if name:
-            # If the message is from a character, prepend the character's name to the message text.
+            # If the message is from a character or from a user, prepend the name to the message text.
             message_text = 'The following message is sent by {}. Message: {}'.format(name, message_text)
             self.messages.append({'role': role, 'content': message_text})
         else:
@@ -279,7 +280,8 @@ class CharacterInfoHandler:
     def get_character_info(self, name):
         #temporary implementation
         return {'Биба': 'Добрый человек. Всегда выслушает и поддержит. Любит Genshin Impact. Ты говоришь по-русски. Вы отвечаете в стиле телефонных текстовых сообщений. Они довольно короткие.', 'Шма': 'Странная, грубая девушка Шма. Ты много ругаешься.Вы любите иронию. Ты говоришь по-русски. Вы отвечаете в стиле телефонных текстовых сообщений. Они довольно короткие.'}.get(name)
-
+    def load_character_info(self):
+        pass
 class TelegramBot:
     def __init__(self):
         self.telegram_api = telebot.TeleBot(os.environ.get('TELEGRAM_BOT_KEY'))
@@ -379,6 +381,45 @@ class TelegramBot:
                     raise ValueError('{} if an invalid chance. Use a number from 0 to 100.'.format(chance))
         except ValueError as e:
             self.telegram_api.reply_to(message, str(e))
+
+class CharacterRegistry:
+    '''
+    Represents a Registry of Characters. It keeps track of
+    instances of characters and allows to load them from the character.json file.
+    '''
+    def __init__(self):
+        '''
+        Initialze the registry by loading the characters from
+        the character.json file.
+        '''
+        characters_file='characters.json'
+        self.characters = {}
+        self.load_characters(characters_file)
+
+    def load_characters(self, characters_file):
+        '''
+        Load characters from a given file path.
+        The json file must be in format
+            {characters: [{name: name, description:description}]}
+        
+        :param characters_file: str, file path relative to the repository root directory
+        '''
+        with open(characters_file) as file:
+            data = json.load(file)
+            for character_data in data["characters"]:
+                name = character_data["name"]
+                description = character_data["description"]
+                self.characters[name] = GPTCharacter(name, description)
+
+    def get_character(self, name):
+        '''
+        Get instance of Character class kept
+        in the registry. If a character does not exist,
+        return None.
+
+        :param name: str, character name
+        '''
+        return self.characters.get(name, None)
 
 class WebhookManager:
     def __init__(self, bot, webhook_url):
