@@ -404,7 +404,7 @@ class CharacterRegistry:
         
         :param characters_file: str, file path relative to the repository root directory
         '''
-        with open(characters_file) as file:
+        with open(characters_file, encoding='utf-8') as file:
             data = json.load(file)
             for character_data in data["characters"]:
                 name = character_data["name"]
