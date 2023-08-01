@@ -290,7 +290,7 @@ class Conversation:
         '''
         # Check if the character name is already in the list before adding it
         if name in self.characters:
-            return None
+            raise ValueError('Character already initialized!')
         
         self.characters.append(name)
         # After adding the character, send a system message as a reminder about the characters.
@@ -370,19 +370,12 @@ class Conversation:
         '''
         return self.characters
 
-class CharacterInfoHandler:
-    def __init__(self):
-        self.file_path = None
-    def get_character_info(self, name):
-        #temporary implementation
-        return {'Биба': 'Добрый человек. Всегда выслушает и поддержит. Любит Genshin Impact. Ты говоришь по-русски. Вы отвечаете в стиле телефонных текстовых сообщений. Они довольно короткие.', 'Шма': 'Странная, грубая девушка Шма. Ты много ругаешься.Вы любите иронию. Ты говоришь по-русски. Вы отвечаете в стиле телефонных текстовых сообщений. Они довольно короткие.'}.get(name)
-    def load_character_info(self):
-        pass
 class TelegramBot:
     def __init__(self):
         self.telegram_api = telebot.TeleBot(os.environ.get('TELEGRAM_BOT_KEY'))
         self.conversations = {}
         self.character_info_handler = CharacterInfoHandler()
+        self.character_registry = CharacterRegistry()
 
     def _handle_message(self):
         self.telegram_api.message_handler(func=lambda msg: True)(self._handle_message_wrapper)
@@ -416,17 +409,20 @@ class TelegramBot:
         self.telegram_api.message_handler(commands=['start'])(self._initialize_conversation_wrapper)
 
     def _initialize_character_wrapper(self, message):
-        if not self.is_chat_initialized(message.chat.id):
-            self.telegram_api.reply_to(message, 'Initialize the chat first')
-            return None
-        
         chat_id = message.chat.id
         bot_name = message.text.strip().strip('/init').strip()
+
+        if not self.is_chat_initialized(chat_id):
+            self.telegram_api.reply_to(message, 'Initialize the chat first')
+            return None
+        chat = self.conversations[chat_id]
+
+        if not bot_name or not self.character_registry.get_character(bot_name):
+            self.telegram_api.reply_to(message, 'Invalid name was sent!')
+            return None
+        
         try:
-            if not bot_name or not self.character_info_handler.get_character_info(bot_name):
-                raise ValueError('Invalid name was sent!')
-            self.conversations[chat_id].add_character(bot_name, self.character_info_handler.get_character_info(bot_name))
-            #self.conversations[chat_id].add_character(bot_name, self.get_character_description(bot_name))
+            self.conversations[chat_id].add_character(bot_name)
             self.telegram_api.reply_to(message, 'Successfully initialized charater {}'.format(bot_name))
         except ValueError as e:
             self.telegram_api.reply_to(message, str(e))
@@ -438,8 +434,7 @@ class TelegramBot:
 
         chat_id = message.chat.id
         try:
-            self.conversations[chat_id] = Conversation()
-            #self.conversations[chat_id] = Conversation(bot_name, self.get_character_description(bot_name))
+            self.conversations[chat_id] = Conversation(self.character_registry)
             self.telegram_api.reply_to(message, 'Successfully initialized the chat')
         except ValueError as e:
             self.telegram_api.reply_to(message, str(e))
