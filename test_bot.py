@@ -1,5 +1,5 @@
 import unittest
-from bot import CharacterRegistry, GPTCharacter
+from bot import CharacterRegistry, GPTCharacter, Conversation
 
 class TestCharacterRegistry(unittest.TestCase):
     def setUp(self):
@@ -45,3 +45,50 @@ class TestCharacterRegistry(unittest.TestCase):
         # Test getting a character that does not exist
         non_existent_character = self.character_registry.get_character("NonExistent")
         self.assertIsNone(non_existent_character)
+
+class TestConversation(unittest.TestCase):
+    def setUp(self):
+        # Initialize the CharacterRegistry and the Conversation for testing
+        self.character_registry = CharacterRegistry()
+        self.conversation = Conversation(self.character_registry)
+
+    def test_add_message(self):
+        # Test adding messages to the conversation
+        self.conversation.add_message('user', 'Hello, how are you?')
+        self.conversation.add_message('assistant', 'I am doing well, thank you!')
+        self.assertEqual(len(self.conversation.messages), 2)
+
+    def test_add_character(self):
+        # Test adding characters to the conversation
+        self.conversation.add_character('Боба')
+        self.conversation.add_character('Зюзя')
+        self.assertEqual(len(self.conversation.get_character_names()), 2)
+
+    def test_generate_response(self):
+        # Test generating responses for characters in the conversation
+        self.conversation.add_character('Jack')
+        response = self.conversation.generate_response('Jack')
+        self.assertIsInstance(response, str)
+
+    def test_reduce_context_size(self):
+        # Test reducing the context size of the conversation
+        self.conversation.add_character('Боба')
+        self.conversation.add_message('user', 'How are you doing?')
+        self.conversation.reduce_context_size('Боба')
+        self.assertEqual(len(self.conversation.messages), 2)
+
+    def test_get_messages(self):
+        # Test getting the list of messages in the conversation
+        self.conversation.add_message('user', 'Hello, how are you?')
+        self.conversation.add_message('assistant', 'I am doing well, thank you!')
+        messages = self.conversation.get_messages()
+        self.assertEqual(len(messages), 2)
+
+    def test_get_character_names(self):
+        # Test getting the names of all characters in the conversation
+        self.conversation.add_character('Боба')
+        self.conversation.add_character('Зюзя')
+        character_names = self.conversation.get_character_names()
+        self.assertEqual(len(character_names), 2)
+        self.assertIn('Боба', character_names)
+        self.assertIn('Зюзя', character_names)

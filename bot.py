@@ -85,12 +85,94 @@ class TokenHandler:
         '''
         self.tokens = amount
 
+class CharacterRegistry:
+    '''
+    Represents a Registry of Characters. It keeps track of
+    instances of characters and allows to load them from the character.json file.
+    '''
+    def __init__(self):
+        '''
+        Initialze the registry by loading the characters from
+        the character.json file.
+        '''
+        characters_file='characters.json'
+        self.characters = {}
+        self.load_characters(characters_file)
+
+    def load_characters(self, characters_file):
+        '''
+        Load characters from a given file path.
+        The json file must be in format
+            {characters: [{name: name, description:description}]}
+        
+        :param characters_file: str, file path relative to the repository root directory
+        '''
+        with open(characters_file, encoding='utf-8') as file:
+            data = json.load(file)
+            for character_data in data["characters"]:
+                name = character_data["name"]
+                description = character_data["description"]
+                self.characters[name] = GPTCharacter(name, description)
+
+    def get_character(self, name):
+        '''
+        Get instance of Character class kept
+        in the registry. If a character does not exist,
+        return None.
+
+        :param name: str, character name
+        '''
+        return self.characters.get(name, None)
+    
+    def get_character_description(self, name):
+        '''
+        Get character description.
+        If a character does not exist,
+        return None.
+
+        :param name: str, character name
+        '''
+        character = self.characters.get(name, None)
+        
+        if character:
+            return character.description
+        return None
+
+class WebhookManager:
+    def __init__(self, bot, webhook_url):
+        self.bot = bot
+        self.webhook_url = webhook_url
+        self.app = Flask(__name__)
+
+    def _handle_request(self):
+        # When the handle_request function is executed, Flask automatically
+        # provides the request object as an argument to the function,
+        # giving access to the details of the incoming request. 
+        if request.headers.get('content-type') == 'application/json':
+            json_data = request.get_json()
+            update = telebot.types.Update.de_json(json_data)
+            self.bot.telegram_api.process_new_updates([update])
+            return 'OK', 200
+        else:
+            return 'Unsupported Media Type', 415
+    def handle_webhook(self):
+        self.app.route('/', methods=['POST'])(self._handle_request)
+    def set_webhook(self):
+        self.bot.telegram_api.remove_webhook()
+        self.bot.telegram_api.set_webhook(url=self.webhook_url)
+
+    def run(self):
+        self.set_webhook()
+        self.handle_webhook()
+        self.bot.start()
+        self.app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+
 class GPTCharacter:
     '''
     Represents a ChatGPT character with
     specific name and description.
     '''
-    def __init__(self, name: str, description: str, model: str = 'gpt-3.5-turbo', token_handler: TokenHandler = None) -> None:
+    def __init__(self, name: str, description: str, model: str = 'gpt-3.5-turbo') -> None:
         '''
         Initialize a ChatGPT character.
         
@@ -103,8 +185,6 @@ class GPTCharacter:
             - Descriptive sentences.
         :param model: str, name of the chatgpt model to be used
             Default: 'gpt-3.5-turbo'
-        :param token_handler: TokenHandler class instance
-            Handles the amount of tokens for a given conversation
         :env variable organization: str, organization key for chatgpt services
             It should be specified in .env file in format CHAT_GPT_ORG = key
             It can be found on personal account page on ChatGPT.com
@@ -116,17 +196,18 @@ class GPTCharacter:
         self.name = name
         self.description = description
         self.model = model
-        self.token_handler = token_handler
         openai.organization = os.environ.get('CHAT_GPT_ORG')
         openai.api_key = os.environ.get('CHAT_GPT_KEY')
 
     def generate_response(self, message_history: list[dict]):
         '''
         Generate a uniqie response based on the
-        character's description and message history.
+        character's description and message history
+        and give an amount of tokens used.
 
         :param message_history: list[dict], list of dictionaries in format
             {'role': role, 'content': message_text}
+        :return: response(str), amount of tokens used(int)
         '''
         output = openai.ChatCompletion.create(
             model=self.model,
@@ -135,22 +216,24 @@ class GPTCharacter:
             frequency_penalty=0,
             messages=message_history
         )
-        self.token_handler.set_tokens(output['usage']['total_tokens'])
-        return output['choices'][0]['message']['content']
+        return output['choices'][0]['message']['content'], output['usage']['total_tokens']
 
 class Conversation:
     '''
     Represents a conversation with multiple characters.
     '''
-    def __init__(self) -> None:
+    def __init__(self, character_registry: CharacterRegistry) -> None:
         '''
         Initialize the Conversation.
 
         Creates an empty list to hold messages, an empty dictionary for characters,
         and a TokenHandler instance to handle tokens for the conversation.
+
+        :param character_registry: CharacterRegistry instance.
         '''
         self.messages = []
-        self.characters = {}
+        self.characters = []
+        self.character_registry = character_registry
         self.token_handler = TokenHandler()
     
     def add_message(self, role, message_text, name = None):
@@ -198,18 +281,24 @@ class Conversation:
         # Bot messages are added with the 'assistant' role.
         self.add_message('assistant', message_text)
 
-    def add_character(self, name, description):
+    def add_character(self, name):
         '''
         Add a character to the conversation.
 
         :param name: str, the name of the character.
         :param description: str, description of the character.
         '''
-        # Create a new GPTCharacter instance and add it to the characters dictionary.
-        self.characters[name] = (GPTCharacter(name, description, token_handler=self.token_handler))
-        # After adding the character, send a system message as a reminder about the character's role.
-        for character in self.characters.values():
-            reminder = IMPERSONATED_ROLE_REMINDER_0_EACH_CHARACTER.format(character.name, character.description)
+        # Check if the character name is already in the list before adding it
+        if name in self.characters:
+            return None
+        
+        self.characters.append(name)
+        # After adding the character, send a system message as a reminder about the characters.
+        self.add_system_message(IMPERSONATED_ROLE_REMINDER_0)
+        for character_name in self.characters:
+            # Add the character description to the conversation messages as a system message
+            description = self.character_registry.get_character_description(character_name)
+            reminder = IMPERSONATED_ROLE_REMINDER_0_EACH_CHARACTER.format(name, description)
             self.add_system_message(reminder)
     
     def add_reminder_bot(self, name):
@@ -219,7 +308,8 @@ class Conversation:
         :param name: str, the name of the character.
         '''
         # Send a system message as a reminder about the character's role.
-        self.add_system_message(IMPERSONATED_ROLE_REMINDER_1.format(name = name, description = self.characters[name].description))
+        description = self.character_registry.get_character_description(name)
+        self.add_system_message(IMPERSONATED_ROLE_REMINDER_1.format(name = name, description = description))
 
     def generate_response(self, name):
         '''
@@ -231,11 +321,15 @@ class Conversation:
         # If the token count is higher than the limit, reduce the context size to prevent token limit exceedance.
         if self.token_handler.get_tokens() > 3000:
             self.reduce_context_size(name)
-        
+        if name not in self.characters:
+            raise ValueError('The bot with name {} is not initialized for the conversation.'.format(name))
+
         # Add a reminder about the character before generating a response.
         self.add_reminder_bot(name)
         # Generate a response for the character using the conversation history.
-        response = self.characters[name].generate_response(self.messages)
+        character = self.character_registry.get_character(name)
+        response, tokens = character.generate_response(self.messages)
+        self.token_handler.set_tokens(tokens)
         # Add the response as an assistant message to the conversation.
         self.add_bot_message(response)
         # Return the generated response.
@@ -252,12 +346,14 @@ class Conversation:
 
         #self.messages = [self.messages.pop()]
         self.messages = []
+        description = self.character_registry.get_character_description(name)
+        # Send a system message as a reminder about the characters.
         self.add_system_message(IMPERSONATED_ROLE_REMINDER_0)
-        for character in self.characters.values():
-            reminder = IMPERSONATED_ROLE_REMINDER_0_EACH_CHARACTER.format(character.name, character.description)
+        for character_name in self.characters:
+            # Add the character description to the conversation messages as a system message
+            description = self.character_registry.get_character_description(character_name)
+            reminder = IMPERSONATED_ROLE_REMINDER_0_EACH_CHARACTER.format(name, description)
             self.add_system_message(reminder)
-        
-        print(self.messages)
 
     def get_messages(self):
         '''
@@ -272,7 +368,7 @@ class Conversation:
 
         :return: list[str], a list of character names.
         '''
-        return [name for name in self.characters]
+        return self.characters
 
 class CharacterInfoHandler:
     def __init__(self):
@@ -382,84 +478,3 @@ class TelegramBot:
         except ValueError as e:
             self.telegram_api.reply_to(message, str(e))
 
-class CharacterRegistry:
-    '''
-    Represents a Registry of Characters. It keeps track of
-    instances of characters and allows to load them from the character.json file.
-    '''
-    def __init__(self):
-        '''
-        Initialze the registry by loading the characters from
-        the character.json file.
-        '''
-        characters_file='characters.json'
-        self.characters = {}
-        self.load_characters(characters_file)
-
-    def load_characters(self, characters_file):
-        '''
-        Load characters from a given file path.
-        The json file must be in format
-            {characters: [{name: name, description:description}]}
-        
-        :param characters_file: str, file path relative to the repository root directory
-        '''
-        with open(characters_file, encoding='utf-8') as file:
-            data = json.load(file)
-            for character_data in data["characters"]:
-                name = character_data["name"]
-                description = character_data["description"]
-                self.characters[name] = GPTCharacter(name, description)
-
-    def get_character(self, name):
-        '''
-        Get instance of Character class kept
-        in the registry. If a character does not exist,
-        return None.
-
-        :param name: str, character name
-        '''
-        return self.characters.get(name, None)
-    
-    def get_character_description(self, name):
-        '''
-        Get character description.
-        If a character does not exist,
-        return None.
-
-        :param name: str, character name
-        '''
-        character = self.characters.get(name, None)
-        
-        if character:
-            return character.description
-        return None
-
-class WebhookManager:
-    def __init__(self, bot, webhook_url):
-        self.bot = bot
-        self.webhook_url = webhook_url
-        self.app = Flask(__name__)
-
-    def _handle_request(self):
-        # When the handle_request function is executed, Flask automatically
-        # provides the request object as an argument to the function,
-        # giving access to the details of the incoming request. 
-        if request.headers.get('content-type') == 'application/json':
-            json_data = request.get_json()
-            update = telebot.types.Update.de_json(json_data)
-            self.bot.telegram_api.process_new_updates([update])
-            return 'OK', 200
-        else:
-            return 'Unsupported Media Type', 415
-    def handle_webhook(self):
-        self.app.route('/', methods=['POST'])(self._handle_request)
-    def set_webhook(self):
-        self.bot.telegram_api.remove_webhook()
-        self.bot.telegram_api.set_webhook(url=self.webhook_url)
-
-    def run(self):
-        self.set_webhook()
-        self.handle_webhook()
-        self.bot.start()
-        self.app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
