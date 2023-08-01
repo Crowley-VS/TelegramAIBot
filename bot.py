@@ -420,6 +420,20 @@ class CharacterRegistry:
         :param name: str, character name
         '''
         return self.characters.get(name, None)
+    
+    def get_character_description(self, name):
+        '''
+        Get character description.
+        If a character does not exist,
+        return None.
+
+        :param name: str, character name
+        '''
+        character = self.characters.get(name, None)
+        
+        if character:
+            return character.description
+        return None
 
 class WebhookManager:
     def __init__(self, bot, webhook_url):
