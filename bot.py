@@ -374,7 +374,6 @@ class TelegramBot:
     def __init__(self):
         self.telegram_api = telebot.TeleBot(os.environ.get('TELEGRAM_BOT_KEY'))
         self.conversations = {}
-        self.character_info_handler = CharacterInfoHandler()
         self.character_registry = CharacterRegistry()
 
     def _handle_message(self):
