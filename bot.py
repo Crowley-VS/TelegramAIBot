@@ -1,5 +1,8 @@
 import openai
+import time
+import psycopg2
 import os
+import sys
 import telebot
 import json
 from dotenv import load_dotenv
@@ -47,6 +50,85 @@ def execute_with_chance(chance=0.5):
                 return target_function(*args, **kwargs)
         return wrapper
     return decorator_function
+
+class DatabaseManager:
+    def __init__(self) -> None:
+        self.connection = self.connect()
+        self.coursor = self.create_coursor()
+        
+    def connect(self):
+        max_retries = 3
+        retries = 0
+
+        while retries < max_retries:
+            try:
+                connection = psycopg2.connect(
+                    dbname=os.environ.get('DATABaSE_NAME'),
+                    user=os.environ.get('DATABaSE_USER_NAME'),
+                    password=os.environ.get('DATABSAE_PASSWORD'),
+                    host=os.environ.get('DATABASE_HOST'),
+                    port=os.environ.get('DATABASE_PORT')
+                )
+                break  # If the connection is successful, exit the loop.
+            except psycopg2.Error as e:
+                print('Error connecting to the database:', e)
+                print('Retrying...')
+                retries += 1
+                time.sleep(2)  # Wait for 2 seconds before retrying.
+
+        if retries == max_retries:
+            print("Failed to connect after multiple attempts. Exiting.")
+            sys.exit()
+        print('Successfully established connection')
+        return connection
+    
+    def create_coursor(self):
+        return self.connection.cursor()
+    
+    def get_character_names(self, conversation_id):
+        self.cursor.execute("SELECT name FROM characters WHERE conversation_id = %s;", conversation_id)
+        characters = self.cursor.fetchall()
+        return characters
+
+    def save_conversation(self, conversation_id, conversation: Conversation):
+        tokens = conversation.token_handler.get_tokens()
+        # Insert or update conversation data into the conversations table
+        self.cursor.execute(
+            "INSERT INTO conversations (id, tokens) VALUES (%s, %s) "
+            "ON CONFLICT (id) DO UPDATE SET tokens = EXCLUDED.tokens;",
+            (conversation_id, tokens)
+        )
+
+        # Get existing characters for the conversation_id as a set
+        existing_characters = set(self.get_character_names(conversation_id))
+
+        # The loop takes O(N) times as 'in' operator on a set takes O(1) times
+        for character_name in conversation.get_character_names():
+            if character_name not in existing_characters:
+            # Insert character data into the characters table
+                self.cursor.execute(
+                    "INSERT INTO characters (name, conversation_id) VALUES (%s, %s);",
+                    (character_name, conversation_id)
+                )
+        # Commit the changes
+        self.connection.commit()
+
+        self.delete_all_messages()
+
+        for message in conversation.get_messages():
+            self.insert_message(conversation_id, message['role'], message['content'])
+
+    def insert_message(self, conversation_id, role, content):
+        self.cursor.execute(
+            "INSERT INTO messages (conversation_id, role, content) VALUES (%s, %s, %s);",
+            (conversation_id, role, content)
+        )
+        self.connection.commit()
+    
+    def delete_all_messages(self, conversation_id):
+        self.cursor.execute("DELETE FROM messages WHERE conversation_id = %s;", (conversation_id,))
+        self.connection.commit()
+        
 
 class TokenHandler:
     '''
