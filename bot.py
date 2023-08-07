@@ -54,7 +54,7 @@ def execute_with_chance(chance=0.5):
 class DatabaseManager:
     def __init__(self) -> None:
         self.connection = self.connect()
-        self.coursor = self.create_coursor()
+        self.cursor = self.create_cursor()
         
     def connect(self):
         max_retries = 3
@@ -63,7 +63,7 @@ class DatabaseManager:
         while retries < max_retries:
             try:
                 connection = psycopg2.connect(
-                    dbname=os.environ.get('DATABaSE_NAME'),
+                    dbname=os.environ.get('DATABASE_NAME'),
                     user=os.environ.get('DATABaSE_USER_NAME'),
                     password=os.environ.get('DATABSAE_PASSWORD'),
                     host=os.environ.get('DATABASE_HOST'),
@@ -77,20 +77,23 @@ class DatabaseManager:
                 time.sleep(2)  # Wait for 2 seconds before retrying.
 
         if retries == max_retries:
-            print("Failed to connect after multiple attempts. Exiting.")
-            sys.exit()
+            print('Failed to connect after multiple attempts. Exiting.')
+            raise RuntimeError('Failed to connect after multiple attempts.')
         print('Successfully established connection')
         return connection
     
-    def create_coursor(self):
-        return self.connection.cursor()
+    def create_cursor(self):
+        try:
+            return self.connection.cursor()
+        except psycopg2.Error as e:
+            raise RuntimeError('Failed to create a cursor. {}'.format(e))
     
     def get_character_names(self, conversation_id):
         self.cursor.execute("SELECT name FROM characters WHERE conversation_id = %s;", conversation_id)
         characters = self.cursor.fetchall()
         return characters
 
-    def save_conversation(self, conversation_id, conversation: Conversation):
+    def save_conversation(self, conversation_id, conversation):
         tokens = conversation.token_handler.get_tokens()
         # Insert or update conversation data into the conversations table
         self.cursor.execute(
@@ -113,7 +116,7 @@ class DatabaseManager:
         # Commit the changes
         self.connection.commit()
 
-        self.delete_all_messages()
+        self.delete_all_messages(conversation_id)
 
         for message in conversation.get_messages():
             self.insert_message(conversation_id, message['role'], message['content'])

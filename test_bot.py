@@ -1,5 +1,10 @@
 import unittest
-from bot import CharacterRegistry, GPTCharacter, Conversation
+import bot
+from bot import CharacterRegistry, GPTCharacter, Conversation, DatabaseManager
+from unittest.mock import MagicMock, patch
+import sqlite3
+import os
+
 
 class TestCharacterRegistry(unittest.TestCase):
     def setUp(self):
@@ -92,3 +97,62 @@ class TestConversation(unittest.TestCase):
         self.assertEqual(len(character_names), 2)
         self.assertIn('Боба', character_names)
         self.assertIn('Зюзя', character_names)
+
+class TestDatabaseManager(unittest.TestCase):
+    @patch('bot.psycopg2.connect')
+    def test_connect_successful(self, mock_connect):
+        # Arrange
+        db_manager = DatabaseManager()
+
+        # Act
+        connection = db_manager.connection
+
+        # Assert
+        self.assertIsNotNone(connection)
+        print(connection)
+        mock_connect.assert_called_once()
+
+    @patch('bot.psycopg2.connect', side_effect=bot.psycopg2.Error)
+    def test_connect_unsuccessful(self, mock_connect):
+        with self.assertRaises(RuntimeError):
+            db_manager = DatabaseManager()
+
+    @patch('bot.DatabaseManager.insert_message')
+    @patch('bot.DatabaseManager.cursor')
+    def test_insert_message(self, mock_cursor, mock_insert_message):
+        # Arrange
+        db_manager = DatabaseManager()
+        conversation_id = 123
+        role = 'user'
+        content = 'Hello'
+
+        # Act
+        db_manager.insert_message(conversation_id, role, content)
+
+        # Assert
+        mock_insert_message.assert_called_once_with(conversation_id, role, content)
+        mock_cursor.assert_called()
+        query = 'INSERT INTO messages (conversation_id, role, content) VALUES ({}, {}, {});'.format(conversation_id, role, content)
+        mock_cursor.return_value.execute.assert_called_once_with("DELETE FROM messages WHERE conversation_id = %s;", (conversation_id,))
+
+    @patch('bot.psycopg2.connect')
+    @patch('bot.DatabaseManager.get_character_names', return_value=[])
+    @patch('bot.DatabaseManager.insert_message')
+    @patch('bot.DatabaseManager.delete_all_messages')
+    def test_save_conversation(self, mock_delete_all_messages, mock_insert_message, mock_get_character_names, mock_connect):
+        # Arrange
+        # Initialize the CharacterRegistry and the Conversation for testing
+        character_registry = CharacterRegistry()
+        conversation = Conversation(character_registry)
+        db_manager = DatabaseManager()
+        conversation_id = 123
+        conversation.add_user_message('Hello!', 'Ostin')
+        conversation.add_user_message('Hi there!', 'Ostin')
+        conversation.add_character('Jack')
+        # Act
+        db_manager.save_conversation(conversation_id, conversation)
+
+        # Assert
+        mock_get_character_names.assert_called_once_with(conversation_id)
+        mock_insert_message.assert_called()
+        mock_delete_all_messages.assert_called_once_with(conversation_id)
