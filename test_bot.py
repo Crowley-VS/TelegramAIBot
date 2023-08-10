@@ -2,9 +2,12 @@ import unittest
 import bot
 from bot import CharacterRegistry, GPTCharacter, Conversation, DatabaseManager
 from unittest.mock import MagicMock, patch
-import sqlite3
+import psycopg2
+from dotenv import load_dotenv
 import os
 
+def load_test_environment_variables():
+    load_dotenv('test.env')
 
 class TestCharacterRegistry(unittest.TestCase):
     def setUp(self):
@@ -98,11 +101,19 @@ class TestConversation(unittest.TestCase):
         self.assertIn('Боба', character_names)
         self.assertIn('Зюзя', character_names)
 
-class TestDatabaseManager(unittest.TestCase):
+class TestDatabaseManagerConnecttion(unittest.TestCase):
+    def setUp(self):
+        # Set up test database connection
+        load_test_environment_variables()
+        self.dbname=os.environ.get('TEST_DATABASE_NAME')
+        self.user=os.environ.get('TEST_DATABaSE_USER_NAME')
+        self.password=os.environ.get('TEST_DATABSAE_PASSWORD')
+        self.host=os.environ.get('TEST_DATABASE_HOST')
+        self.port=os.environ.get('TEST_DATABASE_PORT')
     @patch('bot.psycopg2.connect')
     def test_connect_successful(self, mock_connect):
         # Arrange
-        db_manager = DatabaseManager()
+        db_manager = DatabaseManager(self.dbname, self.user, self.password, self.host, self.port)
 
         # Act
         connection = db_manager.connection
@@ -115,53 +126,142 @@ class TestDatabaseManager(unittest.TestCase):
     @patch('bot.psycopg2.connect', side_effect=bot.psycopg2.Error)
     def test_connect_unsuccessful(self, mock_connect):
         with self.assertRaises(RuntimeError):
-            db_manager = DatabaseManager()
+            db_manager = DatabaseManager(self.dbname, self.user, self.password, self.host, self.port)
 
-    @patch('bot.psycopg2.connect')
-    @patch('bot.DatabaseManager.insert_message')
+class TestDatabaseManager(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Set up test database connection
+        load_test_environment_variables()
+        dbname=os.environ.get('TEST_DATABASE_NAME')
+        user=os.environ.get('TEST_DATABaSE_USER_NAME')
+        password=os.environ.get('TEST_DATABSAE_PASSWORD')
+        host=os.environ.get('TEST_DATABASE_HOST')
+        port=os.environ.get('TEST_DATABASE_PORT')
 
-    def __test_insert_message(self, mock_insert_message, mock_connect):
-        # Test is in the development
+        cls.db_manager = DatabaseManager(dbname, user, password, host, port)
+        cls.conversation = Conversation(CharacterRegistry())
 
+    def tearDown(self):
+        self.clean_up_test_data()  # Roll back any changes made during the test
+
+    @classmethod
+    def tearDownClass(cls):
+        # Clean up the test database after all tests
+        cls.db_manager.connection.close()
+    def clean_up_test_data(self):
+        cursor = self.db_manager.connection.cursor()
+
+        # Delete all data that were inserted during setup
+        cursor.execute("DELETE FROM messages;")
+        cursor.execute("DELETE FROM characters;")
+        cursor.execute("DELETE FROM conversations;")
+
+        # Commit the deletion and close the cursor
+        self.db_manager.connection.commit()
+        cursor.close()
+
+    def test_insert_message(self):
+        conversation_id = 1
+        role = "sender"
+        content = "Hello, world!"
+
+        self.db_manager.cursor.execute(
+            "INSERT INTO conversations (id) VALUES (%s);",
+            (conversation_id, )
+        )
+        # Call the function you want to test
+        self.db_manager.insert_message(conversation_id, role, content)
+
+        # Fetch the inserted data from the test database and assert its correctness
+        self.db_manager.cursor.execute("SELECT conversation_id, role, content FROM messages;")
+        result = self.db_manager.cursor.fetchall()
+
+        self.assertEqual(len(result), 1, "One row should have been inserted")
+        self.assertEqual(result[0], (conversation_id, role, content))
+
+    def test_insert_message_multiple_calls(self):
         # Arrange
-        mock_cursor = MagicMock()
-        mock_connection = MagicMock()
-        mock_cursor.cursor.return_value = mock_cursor
-        # Create an instance of YourDatabaseClass with the mock connection
-        db_manager = DatabaseManager()
-        db_manager.cursor = mock_cursor
-        conversation_id = 123
-        role = 'user'
-        content = 'Hello'
+        conversation_id = 1
+        role = "sender"
+        content = "Hello, world!"
+
+        self.db_manager.cursor.execute(
+            "INSERT INTO conversations (id) VALUES (%s);",
+            (conversation_id, )
+        )
+
+        for i in range(5):
+            self.db_manager.insert_message(conversation_id, role, content)
+        self.db_manager.cursor.execute("SELECT * FROM messages WHERE conversation_id = %s;", (conversation_id,))
+        messages = self.db_manager.cursor.fetchall()
+        self.assertEqual(len(messages), 5)
+
+    def test_delete_all_messages(self):
+        # Arrange
+        conversation_id = 1
+        role = "sender"
+        content = "Hello, world!"
+
+        self.db_manager.cursor.execute(
+            "INSERT INTO conversations (id) VALUES (%s);",
+            (conversation_id, )
+        )
+        self.db_manager.cursor.execute("SELECT * FROM messages WHERE conversation_id = %s;", (conversation_id,))
+        messages = self.db_manager.cursor.fetchall()
+
+        for i in range(5):
+            self.db_manager.insert_message(conversation_id, role, content)
 
         # Act
-        db_manager.insert_message(conversation_id, role, content)
+        self.db_manager.delete_all_messages(conversation_id)
+        self.db_manager.connection.commit()  
 
         # Assert
-        mock_insert_message.assert_called_once_with(conversation_id, role, content)
-        mock_cursor.execute.assert_called()
-        query = 'INSERT INTO messages (conversation_id, role, content) VALUES ({}, {}, {});'.format(conversation_id, role, content)
+        self.db_manager.cursor.execute("SELECT * FROM messages WHERE conversation_id = %s;", (conversation_id,))
+        messages = self.db_manager.cursor.fetchall()
 
-    @patch('bot.psycopg2.connect')
-    @patch('bot.DatabaseManager.get_character_names', return_value=[])
-    @patch('bot.DatabaseManager.insert_message')
-    @patch('bot.DatabaseManager.delete_all_messages')
-    def test_save_conversation(self, mock_delete_all_messages, mock_insert_message, mock_get_character_names, mock_connect):
+        self.assertEqual(len(messages), 0)  # Assert that all messages for the conversation are deleted
+
+    def test_insert_characters(self):
         # Arrange
-        # Initialize the CharacterRegistry and the Conversation for testing
-        character_registry = CharacterRegistry()
-        conversation = Conversation(character_registry)
-        db_manager = DatabaseManager()
-        conversation_id = 123
-        conversation.add_user_message('Hello!', 'Ostin')
-        conversation.add_user_message('Hi there!', 'Ostin')
-        conversation.add_character('Jack')
-        # Act
-        db_manager.save_conversation(conversation_id, conversation)
+        conversation_id = 1
+        self.db_manager.cursor.execute(
+            "INSERT INTO conversations (id) VALUES (%s);",
+            (conversation_id, )
+        )
+        names = ["Alice", "Bob", "Charlie"]  # Replace with character names to insert
+        self.db_manager.cursor.execute(
+                    "INSERT INTO characters (name, conversation_id) VALUES (%s, %s);",
+                    ('Alice', conversation_id)
+                )
+
+        # Act  # Replace with existing character names in the database
+        self.db_manager.insert_characters(conversation_id, names)
 
         # Assert
-        mock_get_character_names.assert_called_once_with(conversation_id)
-        mock_insert_message.assert_called()
-        # 2 messages for character creation and 2 from the users
-        self.assertEqual(mock_insert_message.call_count, 4)
-        mock_delete_all_messages.assert_called_once_with(conversation_id)
+        cursor = self.db_manager.cursor
+        cursor.execute("SELECT name FROM characters WHERE conversation_id = %s;", (conversation_id,))
+        inserted_names = [row[0] for row in cursor.fetchall()]
+
+        expected_names = ["Alice", "Bob", "Charlie"]  # Expected inserted names
+        self.assertEqual(inserted_names, expected_names)
+
+    def test_get_character_names(self):
+        # Arrange
+        conversation_id = 1
+        self.db_manager.cursor.execute(
+            "INSERT INTO conversations (id) VALUES (%s);",
+            (conversation_id, )
+        )
+        expected_names = ["Alice", "Bob", "Charlie"]  # Replace with expected character names
+        for character_name in expected_names:
+            self.db_manager.cursor.execute(
+                "INSERT INTO characters (name, conversation_id) VALUES (%s, %s);",
+                (character_name, conversation_id)
+            )
+        # Act
+        character_names = self.db_manager.get_character_names(conversation_id)
+
+        # Assert
+        self.assertEqual(character_names, expected_names)

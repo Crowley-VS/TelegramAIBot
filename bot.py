@@ -52,22 +52,22 @@ def execute_with_chance(chance=0.5):
     return decorator_function
 
 class DatabaseManager:
-    def __init__(self) -> None:
-        self.connection = self.connect()
+    def __init__(self, dbname, user, password, host, port) -> None:
+        self.connection = self.connect(dbname, user, password, host, port)
         self.cursor = self.create_cursor()
         
-    def connect(self):
+    def connect(self, dbname, user, password, host, port):
         max_retries = 3
         retries = 0
 
         while retries < max_retries:
             try:
                 connection = psycopg2.connect(
-                    dbname=os.environ.get('DATABASE_NAME'),
-                    user=os.environ.get('DATABaSE_USER_NAME'),
-                    password=os.environ.get('DATABSAE_PASSWORD'),
-                    host=os.environ.get('DATABASE_HOST'),
-                    port=os.environ.get('DATABASE_PORT')
+                    dbname=dbname,
+                    user=user,
+                    password=password,
+                    host=host,
+                    port=port
                 )
                 break  # If the connection is successful, exit the loop.
             except psycopg2.Error as e:
@@ -89,8 +89,8 @@ class DatabaseManager:
             raise RuntimeError('Failed to create a cursor. {}'.format(e))
     
     def get_character_names(self, conversation_id):
-        self.cursor.execute("SELECT name FROM characters WHERE conversation_id = %s;", conversation_id)
-        characters = self.cursor.fetchall()
+        self.cursor.execute("SELECT name FROM characters WHERE conversation_id = %s;", (conversation_id,))
+        characters = [name[0] for name in self.cursor.fetchall()]
         return characters
 
     def save_conversation(self, conversation_id, conversation):
@@ -103,19 +103,10 @@ class DatabaseManager:
         )
 
         # Get existing characters for the conversation_id as a set
-        existing_characters = set(self.get_character_names(conversation_id))
-
-        # The loop takes O(N) times as 'in' operator on a set takes O(1) times
-        for character_name in conversation.get_character_names():
-            if character_name not in existing_characters:
-            # Insert character data into the characters table
-                self.cursor.execute(
-                    "INSERT INTO characters (name, conversation_id) VALUES (%s, %s);",
-                    (character_name, conversation_id)
-                )
-        # Commit the changes
-        self.connection.commit()
-
+        db_existing_characters = set(self.get_character_names(conversation_id))
+        current_names = conversation.get_character_names()
+        self.insert_characters(self, conversation_id, current_names, db_existing_characters)
+        
         self.delete_all_messages(conversation_id)
 
         for message in conversation.get_messages():
@@ -127,11 +118,41 @@ class DatabaseManager:
             (conversation_id, role, content)
         )
         self.connection.commit()
+    def insert_characters(self, conversation_id, names):
+        # The loop takes O(N) times as 'in' operator on a set takes O(1) times
+        for character_name in names:
+            if character_name not in set(self.get_character_names(conversation_id)):
+            # Insert character data into the characters table
+                self.cursor.execute(
+                    "INSERT INTO characters (name, conversation_id) VALUES (%s, %s);",
+                    (character_name, conversation_id)
+                )
+        # Commit the changes
+        self.connection.commit()
+        
+    def get_messages(self, conversation_id):
+        self.cursor.execute("SELECT role, content FROM messages WHERE conversation_id = %s;", (conversation_id,))
+        messages = self.cursor.fetchall()
+        return messages
+    
+    def get_tokens(self, conversation_id):
+        self.cursor.execute("SELECT tokens FROM conversations WHERE conversation_id = %s;", (conversation_id,))
+        tokens = self.cursor.fetchone()
+        return tokens
     
     def delete_all_messages(self, conversation_id):
         self.cursor.execute("DELETE FROM messages WHERE conversation_id = %s;", (conversation_id,))
         self.connection.commit()
-        
+
+    def is_conversation_in_database(self, conversation_id):
+        flag = self.cursor.execute("SELECT * FROM conversations WHERE conversation_id = %s;", conversation_id) == []
+        return flag
+    def read_conversation(self, conversation_id):
+        if not self.is_conversation_in_database(conversation_id):
+            return None
+        tokens = self.get_tokens(conversation_id)
+        characters = self.get_character_names(conversation_id)
+        messages = self.get_messages(conversation_id)  
 
 class TokenHandler:
     '''
@@ -556,4 +577,3 @@ class TelegramBot:
                     raise ValueError('{} if an invalid chance. Use a number from 0 to 100.'.format(chance))
         except ValueError as e:
             self.telegram_api.reply_to(message, str(e))
-
