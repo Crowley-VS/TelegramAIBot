@@ -103,9 +103,8 @@ class DatabaseManager:
         )
 
         # Get existing characters for the conversation_id as a set
-        db_existing_characters = set(self.get_character_names(conversation_id))
         current_names = conversation.get_character_names()
-        self.insert_characters(self, conversation_id, current_names, db_existing_characters)
+        self.insert_characters(self, conversation_id, current_names)
         
         self.delete_all_messages(conversation_id)
 
