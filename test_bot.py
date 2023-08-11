@@ -140,7 +140,6 @@ class TestDatabaseManager(unittest.TestCase):
         port=os.environ.get('TEST_DATABASE_PORT')
 
         cls.db_manager = DatabaseManager(dbname, user, password, host, port)
-        cls.conversation = Conversation(CharacterRegistry())
 
     def tearDown(self):
         self.clean_up_test_data()  # Roll back any changes made during the test
@@ -163,7 +162,7 @@ class TestDatabaseManager(unittest.TestCase):
 
     def test_insert_message(self):
         conversation_id = 1
-        role = "sender"
+        role = "user"
         content = "Hello, world!"
 
         self.db_manager.cursor.execute(
@@ -183,7 +182,7 @@ class TestDatabaseManager(unittest.TestCase):
     def test_insert_message_multiple_calls(self):
         # Arrange
         conversation_id = 1
-        role = "sender"
+        role = "user"
         content = "Hello, world!"
 
         self.db_manager.cursor.execute(
@@ -200,7 +199,7 @@ class TestDatabaseManager(unittest.TestCase):
     def test_delete_all_messages(self):
         # Arrange
         conversation_id = 1
-        role = "sender"
+        role = "user"
         content = "Hello, world!"
 
         self.db_manager.cursor.execute(
@@ -255,6 +254,7 @@ class TestDatabaseManager(unittest.TestCase):
             (conversation_id, )
         )
         expected_names = ["Alice", "Bob", "Charlie"]  # Replace with expected character names
+        # Pre-write names into the database
         for character_name in expected_names:
             self.db_manager.cursor.execute(
                 "INSERT INTO characters (name, conversation_id) VALUES (%s, %s);",
@@ -265,3 +265,126 @@ class TestDatabaseManager(unittest.TestCase):
 
         # Assert
         self.assertEqual(character_names, expected_names)
+    def test_save_conversation(self):
+        # Arrange
+        conversation_id = 1
+        self.db_manager.cursor.execute(
+            "INSERT INTO conversations (id) VALUES (%s);",
+            (conversation_id, )
+        )
+        conversation = Conversation(CharacterRegistry())
+        for i in range(5):
+            conversation.add_user_message('Hello, World!', 'John')
+        conversation.add_character('Jack')
+        conversation.token_handler.set_tokens(1000)
+
+        # Act
+        self.db_manager.save_conversation(conversation_id, conversation)
+
+        # Assert
+        # Check conversations table
+        cursor = self.db_manager.connection.cursor()
+        cursor.execute("SELECT tokens FROM conversations WHERE id = %s;", (conversation_id,))
+        tokens = cursor.fetchone()[0] 
+        expected_tokens = 1000  # Replace with expected tokens
+        self.assertEqual(tokens, expected_tokens)
+
+        # Check characters table
+        cursor.execute("SELECT name FROM characters WHERE conversation_id = %s;", (conversation_id,))
+        character_names = [row[0] for row in cursor.fetchall()]
+        expected_character_names = ['Jack']  # Replace with expected character names
+        self.assertEqual(character_names, expected_character_names)
+
+        # Check messages table
+        cursor.execute("SELECT role, content FROM messages WHERE conversation_id = %s;", (conversation_id,))
+        messages = cursor.fetchall()
+        self.assertEqual(len(messages), 7)
+
+    def test_get_messages(self):
+        # Arrange
+        conversation_id = 1  # Replace with a valid conversation ID
+        self.db_manager.cursor.execute(
+            "INSERT INTO conversations (id) VALUES (%s);",
+            (conversation_id, )
+        )
+        expected_messages = [
+            ('user', 'Hello'),
+            ('user', 'Hi'),
+            ('user', 'Hey!')
+        ] 
+        for message in expected_messages:
+            user = message[0]
+            content = message[1]
+            self.db_manager.insert_message(conversation_id, user, content)
+        
+        # Act
+        actual_messages = self.db_manager.get_messages(conversation_id)
+
+        # Assert
+        self.assertEqual(actual_messages, expected_messages)
+    def test_get_tokens(self):
+        # Arrange
+        conversation_id = 1 
+        expected_tokens = 1000
+        self.db_manager.cursor.execute(
+            "INSERT INTO conversations (id, tokens) VALUES (%s, %s) ",
+            (conversation_id, expected_tokens)
+        )
+        
+        # Act
+        actual_tokens = self.db_manager.get_tokens(conversation_id)
+
+        # Assert
+        self.assertEqual(actual_tokens, expected_tokens)
+    def test_is_conversation_in_database(self):
+        # Arrange
+        conversation_id = 1 
+        expected_tokens = 1000
+        self.db_manager.cursor.execute(
+            "INSERT INTO conversations (id, tokens) VALUES (%s, %s) ",
+            (conversation_id, expected_tokens)
+        )
+        
+        # Act
+        actual_flag1 = self.db_manager.is_conversation_in_database(conversation_id)
+        # Chack a non existing conversation
+        actual_flag2 = self.db_manager.is_conversation_in_database(123)
+
+        # Assert
+        self.assertEqual(actual_flag1, True)
+        self.assertEqual(actual_flag2, False)
+    
+    def test_read_conversation(self):
+        # Arrange
+        conversation_id = 1 
+        expected_tokens = 1000
+        self.db_manager.cursor.execute(
+            "INSERT INTO conversations (id, tokens) VALUES (%s, %s) ",
+            (conversation_id, expected_tokens)
+        )
+        
+        self.db_manager.insert_message(conversation_id, 'user', 'Hey!')
+        self.db_manager.insert_message(conversation_id, 'user', 'Hello!')
+        expected_messages = [{'role': 'user', 'content': 'Hey!'},
+                             {'role': 'user', 'content': 'Hello!'}]
+        expected_names = ["Alice", "Bob", "Charlie"]  # Replace with expected character names
+        # Pre-write names into the database
+        for character_name in expected_names:
+            self.db_manager.cursor.execute(
+                "INSERT INTO characters (name, conversation_id) VALUES (%s, %s);",
+                (character_name, conversation_id)
+            )
+        expected_output = (expected_tokens, expected_names, expected_messages)
+        # Act
+        actual_output = self.db_manager.read_conversation(conversation_id)
+
+        # Assert
+        self.assertEqual(actual_output, expected_output)
+    def test_read_conversation_non_existent(self):
+        # Arrange
+        expected_output = None
+        # Act
+        actual_output = self.db_manager.read_conversation(123)
+
+        # Assert
+        self.assertEqual(actual_output, expected_output)

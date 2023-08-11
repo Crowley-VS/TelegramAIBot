@@ -104,7 +104,7 @@ class DatabaseManager:
 
         # Get existing characters for the conversation_id as a set
         current_names = conversation.get_character_names()
-        self.insert_characters(self, conversation_id, current_names)
+        self.insert_characters(conversation_id, current_names)
         
         self.delete_all_messages(conversation_id)
 
@@ -135,8 +135,8 @@ class DatabaseManager:
         return messages
     
     def get_tokens(self, conversation_id):
-        self.cursor.execute("SELECT tokens FROM conversations WHERE conversation_id = %s;", (conversation_id,))
-        tokens = self.cursor.fetchone()
+        self.cursor.execute("SELECT tokens FROM conversations WHERE id = %s;", (conversation_id,))
+        tokens = self.cursor.fetchone()[0]
         return tokens
     
     def delete_all_messages(self, conversation_id):
@@ -144,14 +144,20 @@ class DatabaseManager:
         self.connection.commit()
 
     def is_conversation_in_database(self, conversation_id):
-        flag = self.cursor.execute("SELECT * FROM conversations WHERE conversation_id = %s;", conversation_id) == []
-        return flag
+        self.cursor.execute("SELECT * FROM conversations WHERE id = %s;", (conversation_id,))
+        conversation = self.cursor.fetchone()
+        if not conversation:
+            return False
+        return True
     def read_conversation(self, conversation_id):
         if not self.is_conversation_in_database(conversation_id):
             return None
         tokens = self.get_tokens(conversation_id)
         characters = self.get_character_names(conversation_id)
-        messages = self.get_messages(conversation_id)  
+        messages = self.get_messages(conversation_id)
+        messages = [{'role': message[0], 'content': message[1]} for message in messages]
+        return tokens, characters, messages
+        
 
 class TokenHandler:
     '''
