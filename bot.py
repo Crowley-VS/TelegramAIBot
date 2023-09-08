@@ -518,7 +518,7 @@ class TelegramBot:
         else:
             self.conversations[chat_id].add_user_message(message.text, message.from_user.first_name)
             for name in self.conversations[chat_id].get_character_names():
-                if name in message.text:
+                if name.lower() in message.text.lower():
                     self.telegram_api.reply_to(message, self.conversations[chat_id].generate_response(name))
 
     def is_any_character_initialized(self, chat_id):
