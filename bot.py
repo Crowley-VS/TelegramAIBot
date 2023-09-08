@@ -3,6 +3,7 @@ import time
 import psycopg2
 import os
 import sys
+import threading
 import telebot
 import json
 from dotenv import load_dotenv
@@ -333,7 +334,7 @@ class Conversation:
     '''
     Represents a conversation with multiple characters.
     '''
-    def __init__(self, character_registry: CharacterRegistry) -> None:
+    def __init__(self, character_registry: CharacterRegistry, messages = [], characters = [], tokens = 0) -> None:
         '''
         Initialize the Conversation.
 
@@ -342,10 +343,14 @@ class Conversation:
 
         :param character_registry: CharacterRegistry instance.
         '''
-        self.messages = []
-        self.characters = []
+        self.messages = messages 
+        self.characters = characters
         self.character_registry = character_registry
-        self.token_handler = TokenHandler()
+        self.token_handler = TokenHandler(tokens)
+        self.last_access_timestamp = datetime.now()
+    
+    def get_last_access_timestamp(self):
+        return self.last_access_timestamp
     
     def add_message(self, role, message_text, name = None):
         '''
@@ -483,13 +488,23 @@ class Conversation:
 
 class TelegramBot:
     def __init__(self):
+        dbname=os.environ.get('DATABASE_NAME')
+        user=os.environ.get('DATABaSE_USER_NAME')
+        password=os.environ.get('DATABSAE_PASSWORD')
+        host=os.environ.get('DATABASE_HOST')
+        port=os.environ.get('DATABASE_PORT')
+
         self.telegram_api = telebot.TeleBot(os.environ.get('TELEGRAM_BOT_KEY'))
         self.conversations = {}
         self.character_registry = CharacterRegistry()
+        self.database_manager = DatabaseManager(dbname, user, password, host, port)
 
     def _handle_message(self):
         self.telegram_api.message_handler(func=lambda msg: True)(self._handle_message_wrapper)
-    
+
+    def delete_conversation(self, chat_id):
+        del self.conversations[chat_id]
+
     def _handle_message_wrapper(self, message):
         message_date = datetime.fromtimestamp(message.date)
         date_limit = datetime.now() - timedelta(days=DAYS_LIMIT)
@@ -510,7 +525,14 @@ class TelegramBot:
         if self.conversations[chat_id].characters:
             return True
     def is_chat_initialized(self, chat_id):
-        return chat_id in self.conversations
+        if chat_id in self.conversations:
+            return True
+        elif self.database_manager.is_conversation_in_database(chat_id):
+            tokens, characters, messages = self.database_manager.read_conversation(chat_id)
+            self.conversations[chat_id] = Conversation(self.character_registry, messages, characters, tokens)
+            return True
+        else:
+            return False 
     
     def _initialize_character(self):
         self.telegram_api.message_handler(commands=['init'])(self._initialize_character_wrapper)
@@ -549,7 +571,32 @@ class TelegramBot:
         except ValueError as e:
             self.telegram_api.reply_to(message, str(e))
 
+    def dump_expired_conversations(self):
+        while True:
+            # Adjust the sleep time (e.g., 30 minutes)
+            time.sleep(60)
+
+            # Get the current timestamp
+            current_time = datetime.now()
+
+            for chat_id, conversation in self.conversations.items():
+                if self.is_chat_initialized(chat_id):
+                    last_access_time = conversation.get_last_access_timestamp()
+
+                    # Calculate the time difference
+                    time_difference = current_time - last_access_time
+
+                    # Check if the conversation is expired (last usage > 30 minutes ago)
+                    if time_difference.total_seconds() > 30 * 60:
+                        self.database_manager.save_conversation(chat_id, conversation)
+                        self.delete_conversation(chat_id)
+
     def start(self):
+        # Start a separate thread for periodic dumping
+        dump_thread = threading.Thread(target=self.dump_expired_conversations)
+        dump_thread.daemon = True
+        dump_thread.start()
+
         self._initialize_conversation()
         self._initialize_character()
         self._select_language()
