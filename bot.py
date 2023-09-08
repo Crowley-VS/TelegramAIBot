@@ -575,21 +575,23 @@ class TelegramBot:
         while True:
             # Adjust the sleep time (e.g., 30 minutes)
             time.sleep(60)
-
             # Get the current timestamp
             current_time = datetime.now()
 
+            chat_ids_to_delete = set()
+
             for chat_id, conversation in self.conversations.items():
-                if self.is_chat_initialized(chat_id):
-                    last_access_time = conversation.get_last_access_timestamp()
+                last_access_time = conversation.get_last_access_timestamp()
+                # Calculate the time difference
+                time_difference = current_time - last_access_time
+                # Check if the conversation is expired (last usage > 30 minutes ago)
+                if time_difference.total_seconds() > 60:
+                    self.database_manager.save_conversation(chat_id, conversation)
+                    chat_ids_to_delete.add(chat_id)  # Collect chat IDs to delete
 
-                    # Calculate the time difference
-                    time_difference = current_time - last_access_time
-
-                    # Check if the conversation is expired (last usage > 30 minutes ago)
-                    if time_difference.total_seconds() > 60:
-                        self.database_manager.save_conversation(chat_id, conversation)
-                        self.delete_conversation(chat_id)
+            # Remove expired conversations
+            for chat_id in chat_ids_to_delete:
+                self.delete_conversation(chat_id)
 
     def start(self):
         # Start a separate thread for periodic dumping
