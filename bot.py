@@ -51,7 +51,31 @@ def execute_with_chance(chance=0.5):
                 return target_function(*args, **kwargs)
         return wrapper
     return decorator_function
+def retry(max_retries=3, retry_delay=2):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            retries = 0
+            while retries < max_retries:
+                try:
+                    result = func(*args, **kwargs)
+                    return result  # If the function call is successful, return the result.
+                except psycopg2.Error as e:
+                    print(f"Error in {func.__name__}: {e}")
+                    print(f"Retrying {func.__name__}...")
+                    retries += 1
+                    time.sleep(retry_delay)  # Wait for retry_delay seconds before retrying.
 
+            print(f"Failed to execute {func.__name__} after {max_retries} attempts.")
+            # Fall back to calling reconnect method when max_retries is reached
+            if func.__name__ != 'reconnect':
+                print("Falling back to reconnect...")
+                return args[0].reconnect()
+            raise RuntimeError(f"Failed to execute {func.__name__} after {max_retries} attempts.")
+
+        return wrapper
+
+    return decorator
 class DatabaseManager:
     def __init__(self, dbname, user, password, host, port) -> None:
         self.connection = self.connect(dbname, user, password, host, port)
@@ -82,18 +106,38 @@ class DatabaseManager:
             raise RuntimeError('Failed to connect after multiple attempts.')
         print('Successfully established connection')
         return connection
-    
+    @retry(3, 2)
     def create_cursor(self):
         try:
             return self.connection.cursor()
         except psycopg2.Error as e:
             raise RuntimeError('Failed to create a cursor. {}'.format(e))
-    
+    @retry(3, 2)
+    def check_server_status(self):
+        try:
+            # Execute a simple query to check if the server is responsive
+            self.cursor.execute("SELECT 1")
+            self.connection.commit()
+            return True  # Server is responsive
+        except psycopg2.Error:
+            return False  # Server is not responsive
+    @retry(3, 2)
+    def reconnect(self):
+        try:
+            self.connection.close()
+            print('Connection closed.')
+            self.connection = self.connect()
+            self.cursor = self.create_cursor()
+            print('Successfully re-established connection.')
+        except psycopg2.Error as e:
+            print('Error reconnecting to the database:', e)
+            raise RuntimeError('Failed to reconnect to the database.')
+
     def get_character_names(self, conversation_id):
         self.cursor.execute("SELECT name FROM characters WHERE conversation_id = %s;", (conversation_id,))
         characters = [name[0] for name in self.cursor.fetchall()]
         return characters
-
+    @retry(3, 2)
     def save_conversation(self, conversation_id, conversation):
         tokens = conversation.token_handler.get_tokens()
         # Insert or update conversation data into the conversations table
@@ -143,13 +187,14 @@ class DatabaseManager:
     def delete_all_messages(self, conversation_id):
         self.cursor.execute("DELETE FROM messages WHERE conversation_id = %s;", (conversation_id,))
         self.connection.commit()
-
+    @retry(3, 2)
     def is_conversation_in_database(self, conversation_id):
         self.cursor.execute("SELECT * FROM conversations WHERE id = %s;", (conversation_id,))
         conversation = self.cursor.fetchone()
         if not conversation:
             return False
         return True
+    @retry(3, 2)
     def read_conversation(self, conversation_id):
         if not self.is_conversation_in_database(conversation_id):
             return None
