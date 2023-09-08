@@ -587,7 +587,7 @@ class TelegramBot:
                     time_difference = current_time - last_access_time
 
                     # Check if the conversation is expired (last usage > 30 minutes ago)
-                    if time_difference.total_seconds() > 30 * 60:
+                    if time_difference.total_seconds() > 60:
                         self.database_manager.save_conversation(chat_id, conversation)
                         self.delete_conversation(chat_id)
 
