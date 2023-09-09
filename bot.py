@@ -126,7 +126,7 @@ class DatabaseManager:
         try:
             self.connection.close()
             print('Connection closed.')
-            self.connection = self.connect()
+            self.connection = self.connect(self.dbname, self.user, self.password, self.host, self.port)
             self.cursor = self.create_cursor()
             print('Successfully re-established connection.')
         except psycopg2.Error as e:
