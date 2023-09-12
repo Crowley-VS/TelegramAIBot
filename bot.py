@@ -68,7 +68,7 @@ def retry(max_retries=3, retry_delay=2):
 
             print(f"Failed to execute {func.__name__} after {max_retries} attempts.")
             # Fall back to calling reconnect method when max_retries is reached
-            if func.__name__ != 'reconnect':
+            if retries >= max_retries and func.__name__ != 'reconnect':
                 print("Falling back to reconnect...")
                 return args[0].reconnect()
             raise RuntimeError(f"Failed to execute {func.__name__} after {max_retries} attempts.")
@@ -78,6 +78,11 @@ def retry(max_retries=3, retry_delay=2):
     return decorator
 class DatabaseManager:
     def __init__(self, dbname, user, password, host, port) -> None:
+        self.dbname = dbname
+        self.user = user
+        self.password = password
+        self.host = host
+        self.port = port
         self.connection = self.connect(dbname, user, password, host, port)
         self.cursor = self.create_cursor()
         
