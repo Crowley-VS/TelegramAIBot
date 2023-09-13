@@ -327,7 +327,7 @@ class WebhookManager:
         self.set_webhook()
         self.handle_webhook()
         self.bot.start()
-        self.app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+        self.app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8443)))
 
 class GPTCharacter:
     '''
