@@ -537,7 +537,16 @@ class Conversation:
         return self.characters
 
 class TelegramBot:
+    '''
+    Represents a telegram bot. The class handles:
+    -Keeping track of conversations
+    -Character registry
+    -Database management
+    '''
     def __init__(self):
+        '''
+        Initialize a telegram bot. Connect to the database.
+        '''
         dbname=os.environ.get('DATABASE_NAME')
         user=os.environ.get('DATABaSE_USER_NAME')
         password=os.environ.get('DATABSAE_PASSWORD')
@@ -550,12 +559,34 @@ class TelegramBot:
         self.database_manager = DatabaseManager(dbname, user, password, host, port)
 
     def _handle_message(self):
+        '''
+        Handle all incoming messages.
+        '''
+        # Decorate _handle_message_wrapper with the
+        # message_handler decorator of a TeleBot instance.
+        # Set filter to accept all incoming messages.
         self.telegram_api.message_handler(func=lambda msg: True)(self._handle_message_wrapper)
 
     def delete_conversation(self, chat_id):
+        '''
+        Delete a conversation which has a given chat_id.
+
+        :param chat_id: int chat id os a conversation to be deleted
+        '''
         del self.conversations[chat_id]
 
     def _handle_message_wrapper(self, message):
+        '''
+        Handle an incoming message. Make sure a chat the message was
+        recieved from is initialized and any character is attached to
+        that chat: otherwise, reply accordingly.
+
+        Save the message.
+        Check which character is mentioned in the message and reply
+        accordingly.
+
+        :param message: Message object from Telebot library
+        '''
         message_date = datetime.fromtimestamp(message.date)
         date_limit = datetime.now() - timedelta(days=DAYS_LIMIT)
         if not message_date >= date_limit:
