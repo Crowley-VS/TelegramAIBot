@@ -654,8 +654,8 @@ class TelegramBot:
 
     def dump_expired_conversations(self):
         while True:
-            # Adjust the sleep time (e.g., 4 minutes)
-            time.sleep(4*60)
+            # Adjust the sleep time (e.g., 8 minutes)
+            time.sleep(8*60)
             # Get the current timestamp
             current_time = datetime.now()
 
@@ -665,8 +665,8 @@ class TelegramBot:
                 last_access_time = conversation.get_last_access_timestamp()
                 # Calculate the time difference
                 time_difference = current_time - last_access_time
-                # Check if the conversation is expired (last usage > 2 minutes ago)
-                if time_difference.total_seconds() > 2*60:
+                # Check if the conversation is expired (last usage > 4 minutes ago)
+                if time_difference.total_seconds() > 4*60:
                     print('Logging chat with id: {}'.format(chat_id))
                     self.database_manager.save_conversation(chat_id, conversation)
                     chat_ids_to_delete.add(chat_id)  # Collect chat IDs to delete
