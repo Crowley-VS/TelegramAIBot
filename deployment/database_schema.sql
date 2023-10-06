@@ -1,8 +1,9 @@
--- Table: conversations
-CREATE TABLE conversations (
-    id INTEGER PRIMARY KEY,
-    tokens INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+-- Table: characters
+CREATE TABLE characters (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    conversation_id BIGINT,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id)
 );
 
 -- Table: characters
